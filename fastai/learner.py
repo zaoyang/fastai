@@ -32,8 +32,6 @@ class Learner():
         os.makedirs(self.models_path, exist_ok=True)
         self.crit,self.reg_fn,self.crit = None,None,None
 
-    #def num_features(self): return num_features(self.model)
-
     def __getitem__(self,i): return self.children[i]
 
     @property
@@ -47,8 +45,14 @@ class Learner():
 
     def summary(self): return model_summary(self.model, [3,self.data.sz,self.data.sz])
 
+    def set_bn_freeze(self, m, do_freeze):
+        if hasattr(m, 'running_mean'): m.bn_freeze = do_freeze
+
+    def bn_freeze(self, do_freeze):
+        apply_leaf(self.model, lambda m: self.set_bn_freeze(m, do_freeze))
+
     def freeze_to(self, n):
-        c=self.children
+        c=self.get_layer_groups()
         for l in c:     set_trainable(l, False)
         for l in c[n:]: set_trainable(l, True)
 
@@ -93,6 +97,38 @@ class Learner():
         self.fit_gen(self.model, self.data, layer_opt, n_cycle, **kwargs)
 
     def lr_find(self, start_lr=1e-5, end_lr=10, wds=None):
+        """Helps you find an optimal learning rate for a model.
+
+         It uses the technique developed in the 2015 paper 
+         `Cyclical Learning Rates for Training Neural Networks`, where 
+         we simply keep increasing the learning rate from a very small value, 
+         until the loss starts decreasing.
+
+        Args:
+            start_lr (float/numpy array) : Passing in a numpy array allows you 
+                to specify learning rates for a learner's layer_groups
+            end_lr (float) : The maximum learning rate to try.
+            wds (iterable/float)
+
+        Examples:
+            As training moves us closer to the optimal weights for a model,
+            the optimal learning rate will be smaller. We can take advantage of
+            that knowledge and provide lr_find() with a starting learning rate
+            1000x smaller than the model's current learning rate as such:
+
+            >> learn.lr_find(lr/1000)
+
+            >> lrs = np.array([ 1e-4, 1e-3, 1e-2 ])
+            >> learn.lr_find(lrs / 1000)
+
+        Notes:
+            lr_find() may finish before going through each batch of examples if
+            the loss decreases enough.
+
+        .. _Cyclical Learning Rates for Training Neural Networks:
+            http://arxiv.org/abs/1506.01186
+
+        """
         self.save('tmp')
         layer_opt = self.get_layer_opt(start_lr, wds)
         self.sched = LR_Finder(layer_opt, len(self.data.trn_dl), end_lr)
@@ -104,6 +140,9 @@ class Learner():
     def predict_with_targs(self, is_test=False):
         dl = self.data.test_dl if is_test else self.data.val_dl
         return predict_with_targs(self.model, dl)
+
+    def predict_dl(self, dl): return predict_with_targs(self.model, dl)[0]
+    def predict_array(self, arr): return to_np(self.model(V(T(arr).cuda())))
 
     def TTA(self, n_aug=4, is_test=False):
         dl1 = self.data.test_dl     if is_test else self.data.val_dl

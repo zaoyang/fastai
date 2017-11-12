@@ -3,7 +3,7 @@ from .torch_imports import *
 from .core import *
 from .transforms import *
 from .layer_optimizer import *
-from .dataloader import DataLoader
+#from .dataloader import DataLoader
 
 imagenet_stats = ([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 inception_stats = ([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
@@ -19,12 +19,12 @@ def get_cv_idxs(n, cv_idx=4, val_pct=0.2, seed=42):
 def resize_img(fname, targ, path, new_path):
     dest = os.path.join(path,new_path,str(targ),fname)
     if os.path.exists(dest): return
-    im = PIL.Image.open(os.path.join(path, fname)).convert('RGB')
+    im = Image.open(os.path.join(path, fname)).convert('RGB')
     r,c = im.size
     ratio = targ/min(r,c)
     sz = (scale_to(r, ratio, targ), scale_to(c, ratio, targ))
     os.makedirs(os.path.split(dest)[0], exist_ok=True)
-    im.resize(sz, PIL.Image.LINEAR).save(dest)
+    im.resize(sz, Image.LINEAR).save(dest)
 
 def resize_imgs(fnames, targ, path, new_path):
     if not os.path.exists(os.path.join(path,new_path,str(targ),fnames[0])):
@@ -125,13 +125,13 @@ class FilesDataset(BaseDataset):
     def get_n(self): return len(self.y)
     def get_sz(self): return self.transform.sz
     def get_x(self, i):
-        im = PIL.Image.open(os.path.join(self.path, self.fnames[i])).convert('RGB')
-        return np.array(im, dtype=np.float32)/255.
+        return Image.open(os.path.join(self.path, self.fnames[i]))
     def resize_imgs(self, targ, new_path):
         dest = resize_imgs(self.fnames, targ, self.path, new_path)
         return self.__class__(self.fnames, self.y, self.transform, dest)
+
     def denorm(self,arr):
-        """Denormalizing dataset.
+        """Reverse the normalization done to a batch of images.
 
         Arguments:
             arr: of shape/size (N,3,sz,sz)
@@ -203,6 +203,8 @@ class ModelData():
     @property
     def val_ds(self): return self.val_dl.dataset
     @property
+    def test_ds(self): return self.test_dl.dataset
+    @property
     def trn_y(self): return self.trn_ds.y
     @property
     def val_y(self): return self.val_ds.y
@@ -267,15 +269,15 @@ class ImageClassifierData(ImageData):
     @property
     def is_multi(self): return self.trn_dl.dataset.is_multi
 
-    @classmethod
-    def get_ds(self, fn, trn, val, tfms, test=None, **kwargs):
+    @staticmethod
+    def get_ds(fn, trn, val, tfms, test=None, **kwargs):
         res = [
             fn(trn[0], trn[1], tfms[0], **kwargs), # train
             fn(val[0], val[1], tfms[1], **kwargs), # val
             fn(trn[0], trn[1], tfms[1], **kwargs), # fix
             fn(val[0], val[1], tfms[0], **kwargs)  # aug
         ]
-        if test:
+        if test is not None:
             test_lbls = np.zeros((len(test),1))
             res += [
                 fn(test, test_lbls, tfms[1], **kwargs), # test
@@ -285,20 +287,72 @@ class ImageClassifierData(ImageData):
         return res
 
     @classmethod
-    def from_arrays(self, path, trn, val, bs=64, tfms=(None,None), classes=None, num_workers=4, test=None):
-        datasets = self.get_ds(ArraysIndexDataset, trn, val, tfms, test=test)
-        return self(path, datasets, bs, num_workers, classes=classes)
+    def from_arrays(cls, path, trn, val, bs=64, tfms=(None,None), classes=None, num_workers=4, test=None):
+        """ Read in images and their labels given as numpy arrays
+
+        Arguments:
+            path: a root path of the data (used for storing trained models, precomputed values, etc)
+            trn: a tuple of training data matrix and target label/classification array (e.g. `trn=(x,y)` where `x` has the
+                shape of `(5000, 784)` and `y` has the shape of `(5000,)`)
+            val: a tuple of validation data matrix and target label/classification array.
+            bs: batch size
+            tfms: transformations (for data augmentations). e.g. output of `tfms_from_model`
+            classes: TODO
+            num_workers: a number of workers
+            test: a matrix of test data (the shape should match `trn[0]`)
+
+        Returns:
+            ImageClassifierData
+        """
+        datasets = cls.get_ds(ArraysIndexDataset, trn, val, tfms, test=test)
+        return cls(path, datasets, bs, num_workers, classes=classes)
 
     @classmethod
-    def from_paths(self, path, bs=64, tfms=(None,None), trn_name='train', val_name='valid', test_name=None, num_workers=8):
+    def from_paths(cls, path, bs=64, tfms=(None,None), trn_name='train', val_name='valid', test_name=None, num_workers=8):
+        """ Read in images and their labels given as sub-folder names
+
+        Arguments:
+            path: a root path of the data (used for storing trained models, precomputed values, etc)
+            bs: batch size
+            tfms: transformations (for data augmentations). e.g. output of `tfms_from_model`
+            trn_name: a name of the folder that contains training images.
+            val_name:  a name of the folder that contains validation images.
+            test_name:  a name of the folder that contains test images.
+            num_workers: number of workers
+
+        Returns:
+            ImageClassifierData
+        """
         trn,val = [folder_source(path, o) for o in (trn_name, val_name)]
         test_fnames = read_dir(path, test_name) if test_name else None
-        datasets = self.get_ds(FilesIndexArrayDataset, trn, val, tfms, path=path, test=test_fnames)
-        return self(path, datasets, bs, num_workers, classes=trn[2])
+        datasets = cls.get_ds(FilesIndexArrayDataset, trn, val, tfms, path=path, test=test_fnames)
+        return cls(path, datasets, bs, num_workers, classes=trn[2])
 
     @classmethod
-    def from_csv(self, path, folder, csv_fname, bs=64, tfms=(None,None),
+    def from_csv(cls, path, folder, csv_fname, bs=64, tfms=(None,None),
                val_idxs=None, suffix='', test_name=None, continuous=False, skip_header=True, num_workers=8):
+        """ Read in images and their labels given as a CSV file.
+
+        This method should be used when training image labels are given in an CSV file as opposed to
+        sub-directories with label names.
+
+        Arguments:
+            path: a root path of the data (used for storing trained models, precomputed values, etc)
+            folder: a name of the folder in which training images are contained.
+            csv_fname: a name of the CSV file which contains target labels.
+            bs: batch size
+            tfms: transformations (for data augmentations). e.g. output of `tfms_from_model`
+            val_idxs: index of images to be used for validation. e.g. output of `get_cv_idxs`
+            suffix: suffix to add to image names in CSV file (sometimes CSV only contains the file name without file
+                    extension e.g. '.jpg' - in which case, you can set suffix as '.jpg')
+            test_name: a name of the folder which contains test images.
+            continuous: TODO
+            skip_header: skip the first row of the CSV file.
+            num_workers: number of workers
+
+        Returns:
+            ImageClassifierData
+        """
         fnames,y,classes = csv_source(folder, csv_fname, skip_header, suffix, continuous=continuous)
         ((val_fnames,trn_fnames),(val_y,trn_y)) = split_by_idx(val_idxs, np.array(fnames), y)
 
@@ -307,9 +361,9 @@ class ImageClassifierData(ImageData):
             f = FilesIndexArrayRegressionDataset
         else:
             f = FilesIndexArrayDataset if len(trn_y.shape)==1 else FilesNhotArrayDataset
-        datasets = self.get_ds(f, (trn_fnames,trn_y), (val_fnames,val_y), tfms,
+        datasets = cls.get_ds(f, (trn_fnames,trn_y), (val_fnames,val_y), tfms,
                                path=path, test=test_fnames)
-        return self(path, datasets, bs, num_workers, classes=classes)
+        return cls(path, datasets, bs, num_workers, classes=classes)
 
 def split_by_idx(idxs, *a):
     mask = np.zeros(len(a[0]),dtype=bool)

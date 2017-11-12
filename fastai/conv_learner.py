@@ -4,17 +4,19 @@ from .learner import *
 from .initializers import *
 
 model_meta = {
-    resnet18:[8,6], resnet34:[8,6], resnet50:[8,6], resnet101:[8,6],
+    resnet18:[8,6], resnet34:[8,6], resnet50:[8,6], resnet101:[8,6], resnet152:[8,6],
+    vgg16:[0,22], vgg19:[0,22],
     resnext50:[8,6], resnext101:[8,6], resnext101_64:[8,6],
-    wrn:[8,6], dn121:[10,6], inceptionresnet_2:[-2,9], inception_4:[-1,8]
+    wrn:[8,6], inceptionresnet_2:[-2,9], inception_4:[-1,9],
+    dn121:[0,6], dn161:[0,6], dn169:[0,6], dn201:[0,6],
 }
-model_features = {inception_4: 3072, dn121: 1024}
+model_features = {inception_4: 3072, dn121: 2048, dn161: 4416}
 
 class ConvnetBuilder():
     """Class representing a convolutional network.
 
     Arguments:
-        f: a model creation function
+        f: a model creation function (e.g. resnet34, vgg16, etc)
         c (int): size of the last layer
         is_multi (bool): is multilabel classification?
             (def here http://scikit-learn.org/stable/modules/multiclass.html)
@@ -32,7 +34,7 @@ class ConvnetBuilder():
         cut,self.lr_cut = model_meta[f]
         cut-=xtra_cut
         layers = cut_model(f(True), cut)
-        self.nf = model_features[f] if f in model_features else (num_features(layers[-1])*2)
+        self.nf = model_features[f] if f in model_features else (num_features(layers)*2)
         layers += [AdaptiveConcatPool2d(), Flatten()]
         self.top_model = nn.Sequential(*layers)
 
@@ -86,9 +88,9 @@ class ConvLearner(Learner):
         self.precompute = precompute
 
     @classmethod
-    def pretrained(self, f, data, ps=None, xtra_fc=None, xtra_cut=0, **kwargs):
+    def pretrained(cls, f, data, ps=None, xtra_fc=None, xtra_cut=0, **kwargs):
         models = ConvnetBuilder(f, data.c, data.is_multi, data.is_reg, ps=ps, xtra_fc=xtra_fc, xtra_cut=xtra_cut)
-        return self(data, models, **kwargs)
+        return cls(data, models, **kwargs)
 
     @property
     def model(self): return self.models.fc_model if self.precompute else self.models.model
@@ -119,15 +121,16 @@ class ConvLearner(Learner):
     def save_fc1(self):
         self.get_activations()
         act, val_act, test_act = self.activations
-
+        m=self.models.top_model
         if len(self.activations[0])==0:
-            m=self.models.top_model
             predict_to_bcolz(m, self.data.fix_dl, act)
+        if len(self.activations[1])==0:
             predict_to_bcolz(m, self.data.val_dl, val_act)
+        if len(self.activations[2])==0:
             if self.data.test_dl: predict_to_bcolz(m, self.data.test_dl, test_act)
 
         self.fc_data = ImageClassifierData.from_arrays(self.data.path,
                 (act, self.data.trn_y), (val_act, self.data.val_y), self.data.bs, classes=self.data.classes,
                 test = test_act if self.data.test_dl else None, num_workers=8)
 
-    def freeze(self): self.freeze_to(-self.models.n_fc)
+    def freeze(self): self.freeze_to(-1)

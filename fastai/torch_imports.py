@@ -3,10 +3,11 @@ import torch, torchvision, torchtext
 from torch import nn, cuda, backends, FloatTensor, LongTensor, optim
 import torch.nn.functional as F
 from torch.autograd import Variable
-from torch.utils.data import Dataset, TensorDataset
+from torch.utils.data import Dataset, TensorDataset, DataLoader
 from torch.nn.init import kaiming_uniform, kaiming_normal
 from torchvision.transforms import Compose
-from torchvision.models import resnet18, resnet34, resnet50, resnet101
+from torchvision.models import resnet18, resnet34, resnet50, resnet101, resnet152
+from torchvision.models import vgg16_bn, vgg19_bn
 from torchvision.models import densenet121, densenet161, densenet169, densenet201
 
 from .models.resnext_50_32x4d import resnext_50_32x4d
@@ -16,7 +17,7 @@ from .models.wrn_50_2f import wrn_50_2f
 from .models.inceptionresnetv2 import InceptionResnetV2
 from .models.inceptionv4 import InceptionV4
 
-def children(m): return list(m.children())
+def children(m): return m if isinstance(m, (list, tuple)) else list(m.children())
 def save_model(m, p): torch.save(m.state_dict(), p)
 def load_model(m, p): m.load_state_dict(torch.load(p))
 
@@ -34,3 +35,8 @@ def resnext101(pre): return load_pre(pre, resnext_101_32x4d, 'resnext_101_32x4d'
 def resnext101_64(pre): return load_pre(pre, resnext_101_64x4d, 'resnext_101_64x4d')
 def wrn(pre): return load_pre(pre, wrn_50_2f, 'wrn_50_2f')
 def dn121(pre): return children(densenet121(pre))[0]
+def dn161(pre): return children(densenet161(pre))[0]
+def dn169(pre): return children(densenet169(pre))[0]
+def dn201(pre): return children(densenet201(pre))[0]
+def vgg16(pre): return children(vgg16_bn(pre))[0]
+def vgg19(pre): return children(vgg19_bn(pre))[0]
