@@ -8,6 +8,7 @@ dependencies:
 - numpy
 - pillow
 - jpeg
+- spacy
 - zlib
 - freetype
 - libtiff
@@ -109,5 +110,7 @@ dependencies:
   - docrepr
   - awscli
   - kaggle-cli
+  - ipywidgets
+  - jupyter_contrib_nbextensions
   - git+https://github.com/SauceCat/PDPbox.git
 

@@ -1,3 +1,4 @@
+~*
 tmp*
 tags
 data
@@ -103,3 +104,12 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+.vscode
+
+# osx generated files
+.DS_Store
+.DS_Store?
+.Trashes
+ehthumbs.db
+Thumbs.db

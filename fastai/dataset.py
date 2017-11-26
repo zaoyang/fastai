@@ -3,13 +3,9 @@ from .torch_imports import *
 from .core import *
 from .transforms import *
 from .layer_optimizer import *
-#from .dataloader import DataLoader
+from .dataloader import DataLoader
 
-imagenet_stats = ([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-inception_stats = ([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
-inception_models = (inception_4, inceptionresnet_2)
-
-def get_cv_idxs(n, cv_idx=4, val_pct=0.2, seed=42):
+def get_cv_idxs(n, cv_idx=0, val_pct=0.2, seed=42):
     np.random.seed(seed)
     n_val = int(val_pct*n)
     idx_start = cv_idx*n_val
@@ -89,7 +85,6 @@ def csv_source(folder, csv_file, skip_header=True, suffix='', continuous=False):
 class BaseDataset(Dataset):
     def __init__(self, transform=None):
         self.transform = transform
-        #self.lock=threading.Lock()
         self.n = self.get_n()
         self.c = self.get_c()
         self.sz = self.get_sz()
@@ -118,14 +113,18 @@ class BaseDataset(Dataset):
     @property
     def is_reg(self): return False
 
+def open_image(fn):
+    flags = cv2.IMREAD_UNCHANGED+cv2.IMREAD_ANYDEPTH+cv2.IMREAD_ANYCOLOR
+    return cv2.cvtColor(cv2.imread(fn, flags), cv2.COLOR_BGR2RGB).astype(np.float32)/255
+
 class FilesDataset(BaseDataset):
     def __init__(self, fnames, transform, path):
         self.path,self.fnames = path,fnames
         super().__init__(transform)
     def get_n(self): return len(self.y)
     def get_sz(self): return self.transform.sz
-    def get_x(self, i):
-        return Image.open(os.path.join(self.path, self.fnames[i]))
+    def get_x(self, i): return open_image(os.path.join(self.path, self.fnames[i]))
+
     def resize_imgs(self, targ, new_path):
         dest = resize_imgs(self.fnames, targ, self.path, new_path)
         return self.__class__(self.fnames, self.y, self.transform, dest)
@@ -166,12 +165,8 @@ class ArraysDataset(BaseDataset):
         self.x,self.y=x,y
         assert(len(x)==len(y))
         super().__init__(transform)
-    def get_x(self, i):
-        return self.x[i]
-        #with self.lock: return self.x[i]
-    def get_y(self, i):
-        return self.y[i]
-        #with self.lock: return self.y[i]
+    def get_x(self, i): return self.x[i]
+    def get_y(self, i): return self.y[i]
     def get_n(self): return len(self.y)
     def get_sz(self): return self.x.shape[1]
 
@@ -369,13 +364,3 @@ def split_by_idx(idxs, *a):
     mask = np.zeros(len(a[0]),dtype=bool)
     mask[np.array(idxs)] = True
     return [(o[mask],o[~mask]) for o in a]
-
-def tfms_from_model(f_model, sz, aug_tfms=[], max_zoom=None, pad=0, crop_type=None, tfm_y=None):
-    stats = inception_stats if f_model in inception_models else imagenet_stats
-    tfm_norm = Normalize(*stats)
-    tfm_denorm = Denormalize(*stats)
-    val_tfm = image_gen(tfm_norm, tfm_denorm, sz, pad=pad, crop_type=crop_type, tfm_y=tfm_y)
-    trn_tfm=image_gen(tfm_norm, tfm_denorm, sz, tfms=aug_tfms, max_zoom=max_zoom,
-                      pad=pad, crop_type=crop_type, tfm_y=tfm_y)
-    return trn_tfm, val_tfm
-

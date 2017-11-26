@@ -4,40 +4,60 @@ from .dataset import *
 from .learner import *
 
 
-class ColumnarDataset(Dataset):
-    def __init__(self, cats, conts, y):
-        self.cats = torch.stack([T(x) for x in cats], 1)
-        self.conts = torch.stack([T(x) for x in conts], 1)
-        self.y = T(y).unsqueeze(1)
+class PassthruDataset(Dataset):
+    def __init__(self,*args):
+        *xs,y=args
+        self.xs = xs
+        self.y = y[:,None].astype(np.float32)
 
     def __len__(self): return len(self.y)
-    def __getitem__(self, idx): return [self.cats[idx], self.conts[idx], self.y[idx]]
+    def __getitem__(self, idx): return [o[idx] for o in self.xs] + [self.y[idx]]
 
     @classmethod
-    def from_data_frames(cls, df_cat, df_cont, y):
+    def from_data_frame(self, df, cols_x, col_y):
+        cols = [df[o] for o in cols_x+[col_y]]
+        return self(*cols)
+
+
+class ColumnarDataset(Dataset):
+    def __init__(self, cats, conts, y):
+        n = len(cats[0]) if cats else len(conts[0])
+        self.cats = np.stack(cats, 1).astype(np.int64) if cats else np.zeros((n,0))
+        self.conts = np.stack(conts, 1).astype(np.float32) if conts else np.zeros((n,0))
+        self.y = np.zeros((n,1)) if y is None else y[:,None].astype(np.float32)
+
+    def __len__(self): return len(self.y)
+
+    def __getitem__(self, idx):
+        return [self.cats[idx], self.conts[idx], self.y[idx]]
+
+    @classmethod
+    def from_data_frames(cls, df_cat, df_cont, y=None):
         cat_cols = [c.values for n,c in df_cat.items()]
         cont_cols = [c.values for n,c in df_cont.items()]
         return cls(cat_cols, cont_cols, y)
 
     @classmethod
-    def from_data_frame(cls, df, cat_flds, y):
+    def from_data_frame(cls, df, cat_flds, y=None):
         return cls.from_data_frames(df[cat_flds], df.drop(cat_flds, axis=1), y)
 
 
 class ColumnarModelData(ModelData):
-    def __init__(self, path, trn_ds, val_ds, bs):
-        super().__init__(path, DataLoader(trn_ds, bs, shuffle=True),
-            DataLoader(val_ds, bs*2, shuffle=False))
+    def __init__(self, path, trn_ds, val_ds, bs, test_ds=None):
+        test_dl = DataLoader(test_ds, bs, shuffle=False, num_workers=1) if test_ds is not None else None
+        super().__init__(path, DataLoader(trn_ds, bs, shuffle=True, num_workers=1),
+            DataLoader(val_ds, bs*2, shuffle=False, num_workers=1), test_dl)
 
     @classmethod
-    def from_data_frames(cls, path, trn_df, val_df, trn_y, val_y, cat_flds, bs):
+    def from_data_frames(cls, path, trn_df, val_df, trn_y, val_y, cat_flds, bs, test_df=None):
+        test_ds = ColumnarDataset.from_data_frame(test_df, cat_flds) if test_df is not None else None
         return cls(path, ColumnarDataset.from_data_frame(trn_df, cat_flds, trn_y),
-                    ColumnarDataset.from_data_frame(val_df, cat_flds, val_y), bs)
+                    ColumnarDataset.from_data_frame(val_df, cat_flds, val_y), bs, test_ds=test_ds)
 
     @classmethod
-    def from_data_frame(cls, path, val_idxs, df, y, cat_flds, bs):
+    def from_data_frame(cls, path, val_idxs, df, y, cat_flds, bs, test_df=None):
         ((val_df, trn_df), (val_y, trn_y)) = split_by_idx(val_idxs, df, y)
-        return cls.from_data_frames(path, trn_df, val_df, trn_y, val_y, cat_flds, bs)
+        return cls.from_data_frames(path, trn_df, val_df, trn_y, val_y, cat_flds, bs, test_df=test_df)
 
     def get_learner(self, emb_szs, n_cont, emb_drop, out_sz, szs, drops,
                     y_range=None, use_bn=False):
@@ -130,7 +150,7 @@ class CollabFilterDataset(Dataset):
 
     def get_data(self, val_idxs, bs):
         val, trn = zip(*split_by_idx(val_idxs, *self.cols))
-        return ColumnarModelData(self.path, ColumnarDataset(*trn), ColumnarDataset(*val), bs)
+        return ColumnarModelData(self.path, PassthruDataset(*trn), PassthruDataset(*val), bs)
 
     def get_model(self, n_factors):
         model = EmbeddingDotBias(n_factors, self.n_users, self.n_items, self.min_score, self.max_score)
@@ -164,5 +184,5 @@ class CollabFilterLearner(Learner):
         self.crit = F.mse_loss
 
 class CollabFilterModel(BasicModel):
-    def get_layer_groups(self): return list(split_by_idxs(self.children,[2]))
+    def get_layer_groups(self): return self.model
 

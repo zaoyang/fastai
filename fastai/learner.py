@@ -13,8 +13,8 @@ import time
 
 
 class BasicModel():
-    def __init__(self,model): self.model=model
-    def get_layer_groups(self): return children(self.model)
+    def __init__(self,model,name='unnamed'): self.model,self.name = model,name
+    def get_layer_groups(self, do_fc=False): return children(self.model)
 
 class SingleModel(BasicModel):
     def get_layer_groups(self): return [self.model]
@@ -44,6 +44,8 @@ class Learner():
     def data(self): return self.data_
 
     def summary(self): return model_summary(self.model, [3,self.data.sz,self.data.sz])
+
+    def __repr__(self): return self.model.__repr__()
 
     def set_bn_freeze(self, m, do_freeze):
         if hasattr(m, 'running_mean'): m.bn_freeze = do_freeze
@@ -166,6 +168,6 @@ class Learner():
         dl2 = self.data.test_aug_dl if is_test else self.data.aug_dl
         preds1,targs = predict_with_targs(self.model, dl1)
         preds1 = [preds1]*math.ceil(n_aug/4)
-        preds2 = [predict_with_targs(self.model, dl2)[0] for i in range(n_aug)]
+        preds2 = [predict_with_targs(self.model, dl2)[0] for i in tqdm(range(n_aug), leave=False)]
         return np.stack(preds1+preds2).mean(0), targs
 
